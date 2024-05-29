@@ -1,0 +1,170 @@
+import os
+import time
+from itertools import combinations
+import numpy as np
+import matplotlib.pyplot as plt
+
+class NonogramSolver:
+    def __init__(self, row_clues, column_clues): #initialize a list of clues for row and columns, save the solution
+        self.row_values = row_clues #store clues for rows
+        self.number_of_rows = len(row_clues) #determine the number of rows (n)
+        self.rows_changed = [0] * self.number_of_rows #initialize all as empty
+        self.rows_filled = [0] * self.number_of_rows #initialize all as empty
+ 
+        self.column_values = column_clues #store clues for columns
+        self.number_of_columns = len(column_clues) #determine the number of columns (n)
+        self.columns_changed = [0] * self.number_of_columns #initialize all as empty
+        self.columns_filled = [0] * self.number_of_columns #initialize all as empty
+
+        self.solved = False #set to false as in no solution has been found
+        self.shape = (self.number_of_rows, self.number_of_columns) #store dimentions of the grid in a index,length,filled/notfilled(0/1) truple
+        self.board = [[0 for _ in range(self.number_of_columns)] for _ in range(self.number_of_rows)] #nonogram grid with all rows/columns initialized at 0
+
+        self.rows_permutations = self.create_permutations(row_clues, self.number_of_columns) #possible solutions for each row
+        self.columns_permutations = self.create_permutations(column_clues, self.number_of_rows) #possible solutiions for each column
+
+        while not self.solved:   #main loop continues until puzzle is solved (until True)
+            self.lowest_rows = self.select_index_not_filled(self.rows_permutations, 1) #select rows that are not filled
+            self.lowest_columns = self.select_index_not_filled(self.columns_permutations, 0) #select columns that are not filled
+            self.lowest = sorted(self.lowest_rows + self.lowest_columns, key=lambda element: element[1]) #sort and combine possible solutions
+            #this line allows the solver to focus on row/column with fewer remaining solutions
+
+            for index1, _, row_index in self.lowest:  #for each index in self.lowest
+                if not self.check_done(row_index, index1): #if the row or column is not filled
+                    values = self.rows_permutations[index1] if row_index else self.columns_permutations[index1] #appropriate solutions are selected based on row's status
+                    same_index = self.get_only_one_option(values) #this line finalizes a solution across all solutions
+                    for index2, value in same_index: #for each column/row index update the board
+                        if row_index:  #row_index = 1 row
+                            row_i, column_i = index1, index2 #set row index to index 1, or set column index to index 2
+                        else: #row_index = 0 column
+                            row_i, column_i = index2, index1 #row index is set to index 2, or 
+                        if self.board[row_i][column_i] == 0:
+                            self.board[row_i][column_i] = value
+                            if row_index: #remove conflicting solutions 
+                                self.columns_permutations[column_i] = self.remove_permutations(self.columns_permutations[column_i], row_i, value)
+                            else:
+                                self.rows_permutations[row_i] = self.remove_permutations(self.rows_permutations[row_i], column_i, value)
+                    self.update_done(row_index, index1)
+            self.check_solved()
+        self.display_board() #display result
+
+
+    def create_permutations(self, values, no_of_other):
+        possibilities = []
+        for val in values:
+            groups = len(val)
+            no_empty = no_of_other - sum(val) - groups + 1
+            ones = [[1] * x for x in val]
+            res = self._create_permutations(no_empty, groups, ones)
+            possibilities.append(res)
+        return possibilities
+
+    def _create_permutations(self, n_empty, groups, ones):
+        res_opts = []
+        for combination in combinations(range(groups + n_empty), groups):
+            selected = [-1] * (groups + n_empty)
+            ones_idex = 0
+            for val in combination:
+                selected[val] = ones_idex
+                ones_idex += 1
+            res_opt = [ones[val] + [-1] if val > -1 else [-1] for val in selected]
+            res_opt = [item for sublist in res_opt for item in sublist][:-1]
+            res_opts.append(res_opt)
+        return res_opts
+
+    def select_index_not_filled(self, possibilities, row_ind):
+        s = [len(i) for i in possibilities]
+        if row_ind:
+            return [(i, n, row_ind) for i, n in enumerate(s) if self.rows_filled[i] == 0]
+        else:
+            return [(i, n, row_ind) for i, n in enumerate(s) if self.columns_filled[i] == 0]
+
+    def get_only_one_option(self, values):
+        return [(n, np.unique(i)[0]) for n, i in enumerate(np.array(values).T) if len(np.unique(i)) == 1]
+
+    def remove_permutations(self, possibilities, i, val):
+        return [p for p in possibilities if p[i] == val]
+
+    def display_board(self):
+        fig, ax = plt.subplots()
+        ax.imshow(self.board, cmap="Greys", interpolation="none")
+
+        #gridlines
+        ax.set_xticks(np.arange(-0.5, self.number_of_columns, 1))
+        ax.set_yticks(np.arange(-0.5, self.number_of_rows, 1))
+        ax.grid(which="both", color="black", linestyle='-', linewidth=1)
+    
+        #row clues
+        for r, clue in enumerate(self.row_values):
+            ax.text(-0.5, r, " ".join(map(str, clue)), va='center', ha='right', color='green')
+
+        #column clues
+        for c, clue in enumerate(self.column_values):
+            ax.text(c, -0.5, "\n".join(map(str, clue)), va='bottom', ha='center', color='green')
+
+        ax.tick_params(which="both", bottom=False, left=False, labelbottom=False, labelleft=False)
+
+        plt.show()
+
+
+
+    def save_board(self, increase_size=20):
+        name = f"0000000{str(self.n)}"[-8:]
+        increased_board = np.zeros(np.array((self.number_of_rows, self.number_of_columns)) * increase_size)
+        for j in range(self.number_of_rows):
+            for k in range(self.number_of_columns):
+                increased_board[
+                    j * increase_size : (j + 1) * increase_size,
+                    k * increase_size : (k + 1) * increase_size,
+                ] = self.board[j][k]
+        plt.imsave(os.path.join(self.savepath, f"{name}.jpeg"), increased_board, cmap="Greys", dpi=1000)
+
+    def update_done(self, row_ind, idx):
+        if row_ind:
+            vals = self.board[idx]
+        else:
+            vals = [row[idx] for row in self.board]
+        if 0 not in vals:
+            if row_ind:
+                self.rows_filled[idx] = 1
+            else:
+                self.columns_filled[idx] = 1
+
+    def check_done(self, row_ind, idx):
+        if row_ind:
+            return self.rows_filled[idx]
+        else:
+            return self.columns_filled[idx]
+
+    def check_solved(self):
+        if 0 not in self.rows_filled and 0 not in self.columns_filled:
+            self.solved = True
+
+def print_grid(grid):  #print a gird made of .s and #s
+    print("Puzzle Solution:")
+    for row in grid:
+        print(" ".join("#" if x == 1 else "." for x in row))
+
+def parse_clues(clues_str): #parse clues  
+    return [[int(val) for val in group.split()] for group in clues_str.split(",")]
+
+
+def main(): #main function to print user a menu and take in clues from user
+    while True:
+        print("Menu:\n1. Enter a new Nonogram puzzle\n2. Exit")
+        choice = input("Enter your choice: ")
+        if choice == "2":
+            break
+
+        grid_size = int(input("Enter the size(n) of the puzzle (n x n): "))
+        row_input = input("Enter the row clues (separate with a comma for the next row): ")
+        col_input = input("Enter the column clues (separate with a comma for the next column): ")
+
+        row_clues = parse_clues(row_input)
+        col_clues = parse_clues(col_input)
+
+        solver = NonogramSolver(row_clues, col_clues)
+        print_grid(solver.board)
+
+if __name__ == "__main__":
+    main()
